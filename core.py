@@ -526,7 +526,14 @@ def _collect_health(api: RouterOSApi, dev: Device) -> None:
     dev.router_id = pick_router_id(
         _talk_or_empty(api, ["/routing/ospf/instance/print"]),
         _talk_or_empty(api, ["/routing/id/print"]))
+    if dev.macs:
+        dev.macs = drop_virtual_macs(dev.macs, {w["name"] for w in dev.wireless if w.get("virtual")})
     dev.extended = True
+
+
+def drop_virtual_macs(macs: List[Dict], virtual) -> List[Dict]:
+    """The MAC list without the virtual APs (they have the type of a real wlan)."""
+    return [m for m in macs if m.get("name") not in virtual]
 
 
 # Interface types that are real hardware (their MAC identifies the device); vlan, bridge,
@@ -574,7 +581,9 @@ def _read_wireless(api: RouterOSApi, dev: Device, menu: str, link_downs: Dict[st
             "name": r.get("name", ""), "ssid": r.get("ssid") or r.get("configuration.ssid", ""),
             "radio_name": r.get("radio-name", ""), "disabled": r.get("disabled") == "true",
             "running": r.get("running") == "true", "link_downs": link_downs.get(r.get("name", "")),
-            "menu": menu.rsplit("/", 1)[-1]})
+            "menu": menu.rsplit("/", 1)[-1],
+            # a virtual AP (wireless: interface-type=virtual, wifi: has a master-interface)
+            "virtual": r.get("interface-type") == "virtual" or bool(r.get("master-interface"))})
 
 
 def _is_auth_failure(exc: Exception) -> bool:

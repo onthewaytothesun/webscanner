@@ -39,13 +39,14 @@ _VOWELS = set("aeiou")
 # abbreviations written as separate words, and words whose spelling cannot be rebuilt
 # from the Latin letters (the soft sign, э instead of е)
 BUILTIN_WORDS: Dict[str, str] = {
-    "sh": "ш", "pr": "пр-т", "ul": "ул", "per": "пер", "pl": "пл", "nab": "наб", "al": "ал",
-    "tup": "туп", "mkr": "мкр", "d": "д", "dom": "д", "korp": "корп", "str": "стр", "g": "г",
-    "pos": "пос", "bulvar": "бульвар", "proezd": "проезд", "shosse": "шоссе",
+    "sh": "ш.", "pr": "пр-т", "ul": "ул.", "per": "пер.", "pl": "пл.", "nab": "наб.", "al": "ал.",
+    "tup": "туп.", "mkr": "мкр.", "d": "д.", "dom": "д.", "korp": "корп.", "str": "стр.", "g": "г.",
+    "pos": "пос.", "bulvar": "бульвар", "proezd": "проезд", "shosse": "шоссе",
     "ploshchad": "площадь", "ploschad": "площадь",
     "bolshaya": "Большая", "bolshoy": "Большой", "bolshoe": "Большое", "bolshie": "Большие",
     "ulyanova": "Ульянова", "ulyanovskaya": "Ульяновская", "ilyicha": "Ильича",
-    "kuzminki": "Кузьминки", "kuzminskaya": "Кузьминская",
+    "kuzminki": "Кузьминки", "kuzminskaya": "Кузьминская", "gorkogo": "Горького",
+    "pyatnitskaya": "Пятницкая", "kuznetskiy": "Кузнецкий", "kuznetskaya": "Кузнецкая",
 }
 # two words that are one abbreviation: b_r -> б-р
 COMBOS: Dict[Tuple[str, str], str] = {
@@ -53,6 +54,18 @@ COMBOS: Dict[Tuple[str, str], str] = {
 }
 # a word that starts like this starts with э, not е
 _E_STEMS = ("elektr", "energ", "entuz", "ekspr", "ekonom", "eksper", "estonsk", "ekolog", "ehr")
+# where the Latin spelling hides a soft sign («'» below) or a «тс» that is not «ц»:
+# Shkolnaya -> Школьная, Podolsk -> Подольск, Oktyabrskaya -> Октябрьская,
+# Ilyinskaya -> Ильинская, Vasilyevskaya -> Васильевская, Sovetskaya -> Советская
+_CONSONANT = "bcdfghjklmnpqrstvwxz"
+_SPELLING = (
+    (re.compile(r"lsk"), "l'sk"),
+    (re.compile(r"brsk"), "br'sk"),
+    (re.compile(r"ln(aya|yaya|yy|yi|yj|iy|oe|ye|ie|ogo|oy|ykh|ikh|aja)$"), r"l'n\1"),
+    (re.compile(rf"(?<=[{_CONSONANT}])yi"), "'i"),
+    (re.compile(rf"(?<=[{_CONSONANT}])ye"), "'ye"),
+    (re.compile(r"tsk"), "t\x00sk"),
+)
 _HOUSE = re.compile(r"^\d")      # a token that starts with a digit is a house number: 128k1, 59s2, 1k5s3
 _TRAIL = re.compile(r"\s*\(\s*\d+\s*\)\s*$")
 _ARROW = re.compile(r"\s*(?:->|→|=>)\s*")
@@ -66,6 +79,8 @@ def _word(token: str) -> str:
     if low.startswith(_E_STEMS):
         out.append("э")
         i = 1
+    for pattern, repl in _SPELLING:
+        low = pattern.sub(repl, low)
     while i < len(low):
         for latin, cyr in _DIGRAPHS:
             if low.startswith(latin, i):
@@ -76,7 +91,11 @@ def _word(token: str) -> str:
             ch = low[i]
             if ch == "y":
                 prev = low[i - 1] if i else ""
-                out.append("й" if prev in _VOWELS or not prev else "ы")
+                out.append("й" if prev in _VOWELS or prev == "y" or not prev else "ы")
+            elif ch == "'":
+                out.append("ь")
+            elif ch == "\x00":       # only splits a digraph: t|s
+                pass
             elif ch in _LETTERS:
                 out.append(_LETTERS[ch])
             else:

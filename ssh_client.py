@@ -375,6 +375,11 @@ def _health_script() -> str:
         ':foreach i in=[/interface wireless find] do={:put ("__MTSCAN__wlan=" . [/interface wireless get $i name] . "|" . '
         '[/interface wireless get $i disabled] . "|" . [/interface wireless get $i running] . "|" . '
         '[/interface wireless get $i radio-name] . "|" . [/interface wireless get $i ssid])}',
+        # virtual APs: their MACs are not the device's own (core.drop_virtual_macs)
+        ':foreach i in=[/interface wireless find where interface-type="virtual"] do={'
+        ':put ("__MTSCAN__vif=" . [/interface wireless get $i name])}',
+        ':foreach i in=[/interface wifi find where master-interface] do={'
+        ':put ("__MTSCAN__vif=" . [/interface wifi get $i name])}',
         ':foreach i in=[/interface wifi find] do={:local s ""; :do {:set s [/interface wifi get $i configuration.ssid]} on-error={}; '
         ':put ("__MTSCAN__wlan=" . [/interface wifi get $i name] . "|" . [/interface wifi get $i disabled] . "|" . '
         '[/interface wifi get $i running] . "||" . $s)}',
@@ -407,6 +412,7 @@ def parse_health(lines: List[str], dev) -> None:
     instances: List[Dict] = []
     ids: List[Dict] = []
     macs: List[Dict] = []
+    virtual: set = set()
     done = False
 
     def port(name: str) -> Dict:
@@ -442,6 +448,8 @@ def parse_health(lines: List[str], dev) -> None:
         elif key == "if" and len(fields) >= 3:
             if fields[2]:
                 macs.append({"name": fields[0], "type": fields[1], "mac": fields[2].upper()})
+        elif key == "vif" and fields[0]:
+            virtual.add(fields[0])
         elif key == "w60" and len(fields) >= 5:
             entry = health.w60g_entry(fields[0], {"remote-address": fields[1], "rssi": fields[2],
                                                   "signal": fields[3], "connected": fields[4]})
@@ -461,7 +469,8 @@ def parse_health(lines: List[str], dev) -> None:
     from core import pick_router_id
     dev.router_id = pick_router_id(instances, ids)
     if macs:
-        dev.macs = macs
+        from core import drop_virtual_macs
+        dev.macs = drop_virtual_macs(macs, virtual)
     if addresses:   # with network / dynamic, which the plain inventory line lacks
         dev.addresses = addresses
     dev.ports = list(ports.values())

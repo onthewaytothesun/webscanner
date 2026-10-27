@@ -1215,7 +1215,7 @@ class ScannerApp:
                 self.on_update_one(iid)
         elif self._shown_column(col) == "winbox":
             self.on_winbox(iid)
-        elif self._shown_column(col) == "ping":
+        elif self._shown_column(col) == "ping" and not self.VIEWER:   # the viewer only shows the last ping
             self.on_ping(iid)
 
     def _set_checked(self, iid: str, state: bool) -> None:

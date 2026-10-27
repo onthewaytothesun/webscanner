@@ -1645,7 +1645,7 @@ def test_gui_create_task_from_the_problem_cell():
         assert "Создать задачу" in commands(status_menu)
         status_menu.invoke(commands(status_menu).index("Создать задачу"))
         assert root.clipboard_get() == (
-            "Варшавское ш 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Кавказский б-р 59с2")
+            "Варшавское ш. 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Кавказский б-р 59с2")
         assert "Создать задачу" in commands(right_click("S1", "signal"))
         assert "Создать задачу" not in commands(right_click("S1", "IP"))            # only on the problem cells
         app.devices["S1"].confirmed = ["radio"]                                      # accepted: no task
@@ -1697,6 +1697,15 @@ def test_viewer_has_only_the_allowed_controls_and_keeps_its_own_settings():
         assert int(viewer.tree.column("#0", "width")) < int(root2.winfo_width()) and viewer._icon_w == viewer._icon_size
         viewer.on_update_one("S1")
         assert not viewer._busy()
+        # a click on a «Ping» cell does not ping (the viewer only shows the last result)
+        pinged = []
+        viewer.on_ping = pinged.append
+        viewer.tree.identify_region = lambda x, y: "cell"
+        viewer.tree.identify_row = lambda y: "S1"
+        viewer.tree.identify_column = lambda x: "#1"
+        viewer._shown_column = lambda col: "ping"
+        viewer._on_tree_click(type("E", (), {"x": 5, "y": 5, "state": 0})())
+        assert pinged == []
         viewer.var_user.set("stp"); viewer.var_pass.set("stp-pass"); viewer.var_save.set(True)
     finally:
         viewer._on_close()

@@ -16,11 +16,11 @@ from store import ConfigStore, app_dir  # noqa: E402
 
 def test_router_identities_become_russian_addresses():
     assert address.parse_identity("CP_Natashi_Kovshovoy_29") == ("Наташи Ковшовой 29", "")
-    assert address.parse_identity("S_Varshavskoe_sh_128k1") == ("Варшавское ш 128к1", "")
+    assert address.parse_identity("S_Varshavskoe_sh_128k1") == ("Варшавское ш. 128к1", "")
     assert address.parse_identity("V_Dorozhnaya_1k5s3")[0] == "Дорожная 1к5с3"
     assert address.parse_identity("CPL_Kirovogradskaya_20a")[0] == "Кировоградская 20а"
     assert address.parse_identity("R_Elektrozavodskaya_5")[0] == "Электрозаводская 5"
-    assert address.parse_identity("CP_Podolskikh_Kursantov_7")[0] == "Подолских Курсантов 7"
+    assert address.parse_identity("CP_Podolskikh_Kursantov_7")[0] == "Подольских Курсантов 7"
 
 
 def test_the_number_in_brackets_at_the_end_is_ignored():
@@ -32,13 +32,19 @@ def test_the_number_in_brackets_at_the_end_is_ignored():
 
 def test_antenna_identities_have_both_addresses_and_no_prefix():
     assert address.parse_identity("AP_Varshavskoe_sh_128k1->Kavkazskiy_b_r_59s2") == (
-        "Варшавское ш 128к1", "Кавказский б-р 59с2")
+        "Варшавское ш. 128к1", "Кавказский б-р 59с2")
     assert address.parse_identity("CPE_Dorozhnaya_1k5s3->Dnepropetrovskaya_1") == (
         "Дорожная 1к5с3", "Днепропетровская 1")
     assert address.parse_identity("") == ("", "")
 
 
 def test_the_operators_own_spellings_win():
+    for latin, russian in (("R_Sovetskaya_10", "Советская 10"), ("S_Shkolnaya_1", "Школьная 1"),
+                           ("S_Ilyinskaya_1", "Ильинская 1"), ("CP_Oktyabrskaya_9", "Октябрьская 9"),
+                           ("S_Tsentralnyy_pr_d_4", "Центральный пр-д 4"), ("S_Solnechnaya_1", "Солнечная 1"),
+                           ("S_Vasilyevskaya_2", "Васильевская 2"), ("V_Bratskaya_ul_5", "Братская ул. 5"),
+                           ("S_Tsvetochnaya_2", "Цветочная 2"), ("S_Novyy_Arbat_1", "Новый Арбат 1")):
+        assert address.parse_identity(latin)[0] == russian, latin
     assert address.parse_identity("CP_Ulyanova_3")[0] == "Ульянова 3"             # built in (the soft sign)
     assert address.parse_identity("CP_Ulyanova_3", {"Ulyanova": "Ульяновой"})[0] == "Ульяновой 3"
     assert address.parse_identity("CP_Zhukova_1", {"zhukova": "Жукова"})[0] == "Жукова 1"
@@ -56,12 +62,12 @@ def _router():
 def test_radio_task_names_the_opposite_antenna():
     dev = _router()
     assert tasks.radio_tasks(dev) == [
-        "Варшавское ш 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Кавказский б-р 59с2"]
+        "Варшавское ш. 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Кавказский б-р 59с2"]
     # the device that owns the MAC at the other end is better than the name after «->»
     peer = Device(ip="10.20.0.2", identity="CPE_Dorozhnaya_1k5s3->Varshavskoe_sh_128k1",
                   macs=[{"name": "wlan1", "type": "wlan", "mac": "CC:00:00:00:00:09"}])
     found = tasks.radio_tasks(dev, lambda mac: core.find_by_mac([dev, peer], mac))
-    assert found == ["Варшавское ш 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Дорожная 1к5с3"]
+    assert found == ["Варшавское ш. 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Дорожная 1к5с3"]
     plain = _router()
     plain.identity = "CP_Natashi_Kovshovoy_29"                     # a router: nothing says who is there
     assert tasks.radio_tasks(plain)[0].endswith("в сторону CC:00:00:00:00:09")

@@ -140,7 +140,7 @@ def test_api_without_wireless_package_is_fine():
 
 def test_ssh_health_script_is_isolated_and_its_reply_parsed():
     script = ssh_client._health_script()
-    assert script.count("[[:parse ") == 15 and script.endswith(':put "__MTSCAN__health=1"')
+    assert script.count("[[:parse ") == 17 and script.endswith(':put "__MTSCAN__health=1"')
     assert ssh_client._rsc_string('a "b" $x \\ y') == '"a \\"b\\" \\$x \\\\ y"'
     reply = """__MTSCAN__eth=ether1|true
 __MTSCAN__eth=ether2|false
@@ -340,9 +340,12 @@ def test_macs_of_physical_interfaces_and_the_software_id_are_collected():
         "/interface/print =.proplist=name,type,mac-address,link-downs,rx-error,tx-error": [
             {"name": "ether1", "type": "ether", "mac-address": "aa:00:00:00:00:01"},
             {"name": "wlan1", "type": "wlan", "mac-address": "AA:00:00:00:00:02"},
+            {"name": "wlan2", "type": "wlan", "mac-address": "AA:00:00:00:00:03"},   # a virtual AP
             {"name": "bridge1", "type": "bridge", "mac-address": "AA:00:00:00:00:01"},
             {"name": "vlan_2", "type": "vlan", "mac-address": "AA:00:00:00:00:01"},
             {"name": "l2tp-out1", "type": "l2tp-out"}],
+        "/interface/wireless/print": [{"name": "wlan1", "interface-type": "Atheros AR9300"},
+                                      {"name": "wlan2", "interface-type": "virtual", "master-interface": "wlan1"}],
     })
     dev = Device(ip="10.0.0.1")
     core._collect_fields(api, dev)
@@ -350,7 +353,7 @@ def test_macs_of_physical_interfaces_and_the_software_id_are_collected():
     assert dev.macs == [{"name": "ether1", "type": "ether", "mac": "AA:00:00:00:00:01"},
                         {"name": "wlan1", "type": "wlan", "mac": "AA:00:00:00:00:02"}]
     reply = ["__MTSCAN__if=ether1|ether|aa:00:00:00:00:01", "__MTSCAN__if=wlan1|wlan|AA:00:00:00:00:02",
-             "__MTSCAN__health=1"]
+             "__MTSCAN__if=wlan2|wlan|AA:00:00:00:00:03", "__MTSCAN__vif=wlan2", "__MTSCAN__health=1"]
     parsed = Device()
     ssh_client.parse_health(reply, parsed)
     assert parsed.macs == dev.macs
