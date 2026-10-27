@@ -63,6 +63,11 @@ class Device:
     main_ip: str = ""   # chosen by the operator: shown in the table and tried first
     router_id: str = "" # OSPF router-id set on the device ('' when none / 0.0.0.0)
     ping: str = ""      # ping to the device at the last interaction ("12 мс" / "нет ответа")
+    software_id: str = ""   # /system license software-id
+    macs: List[Dict] = field(default_factory=list)   # physical interfaces only: name, type, mac
+    is_new: bool = False    # found by a scan of a table that already had devices (green until accepted / backed up)
+    port_findings: List[Dict] = field(default_factory=list)    # what is wrong with which port (for tasks)
+    radio_findings: List[Dict] = field(default_factory=list)   # what is wrong with which radio link
 
     @property
     def reach_ip(self) -> str:
@@ -425,8 +430,9 @@ def _collect_fields(api: RouterOSApi, dev: Device) -> None:
         if lic:
             row = lic[0]
             dev.license = row.get("nlevel") or row.get("level", "")
+            dev.software_id = row.get("software-id", "")
             if not dev.key:
-                dev.key = row.get("software-id", "")
+                dev.key = dev.software_id
     except RouterOSError:
         pass
 
@@ -469,9 +475,14 @@ def _collect_health(api: RouterOSApi, dev: Device) -> None:
                            "errors": health.error_counters(row)}
     link_downs: Dict[str, Optional[int]] = {}
     types: Dict[str, str] = {}
-    for row in _talk_or_empty(api, ["/interface/print", "=.proplist=name,type,link-downs,rx-error,tx-error"]):
+    macs: List[Dict] = []
+    for row in _talk_or_empty(api, ["/interface/print",
+                                    "=.proplist=name,type,mac-address,link-downs,rx-error,tx-error"]):
         link_downs[row.get("name", "")] = health.to_int(row.get("link-downs"))
         types[row.get("name", "")] = row.get("type", "")
+        if row.get("type") in PHYSICAL_TYPES and row.get("mac-address"):
+            macs.append({"name": row.get("name", ""), "type": row.get("type", ""),
+                         "mac": row["mac-address"].upper()})
         port = ports.get(row.get("name", ""))
         if port is not None:
             port["link_downs"] = health.to_int(row.get("link-downs"))
@@ -484,6 +495,8 @@ def _collect_health(api: RouterOSApi, dev: Device) -> None:
                 port["rate"] = mon[0].get("rate", "")
                 port["full_duplex"] = mon[0].get("full-duplex", "")
     dev.ports = list(ports.values())
+    if macs:
+        dev.macs = macs
     dev.wireless, dev.radio = [], []
     kinds = radio_kinds(types)
     if "wlan" in kinds:            # classic wireless package (wlan1, wlan2)
@@ -514,6 +527,27 @@ def _collect_health(api: RouterOSApi, dev: Device) -> None:
         _talk_or_empty(api, ["/routing/ospf/instance/print"]),
         _talk_or_empty(api, ["/routing/id/print"]))
     dev.extended = True
+
+
+# Interface types that are real hardware (their MAC identifies the device); vlan, bridge,
+# vrrp, tunnels and the like are virtual and are not recorded.
+PHYSICAL_TYPES = ("ether", "wlan", "wifi", "wifiwave2", "w60g")
+
+
+def device_macs(dev: Device) -> List[str]:
+    """MAC addresses of the physical interfaces, in the order of the interfaces."""
+    return list(dict.fromkeys(m["mac"] for m in dev.macs if m.get("mac")))
+
+
+def find_by_mac(devices, mac: str) -> Optional[Device]:
+    """The device that owns this MAC on a physical interface (for the peer of a radio link)."""
+    want = mac.upper().replace("-", ":")
+    if not want:
+        return None
+    for dev in devices:
+        if want in device_macs(dev):
+            return dev
+    return None
 
 
 def radio_kinds(types: Dict[str, str]) -> set:
