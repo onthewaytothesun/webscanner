@@ -369,9 +369,6 @@ def _health_script() -> str:
         '[/routing ospf instance get $i router-id] . "|" . [/routing ospf instance get $i disabled])}',
         ':foreach i in=[/routing id find] do={:put ("__MTSCAN__rtid=" . [/routing id get $i name] . "|" . '
         '[/routing id get $i id])}',
-        ':foreach i in=[/interface find where (type="ether" or type="wlan" or type="wifi" or '
-        'type="wifiwave2" or type="w60g")] do={:do {:put ("__MTSCAN__if=" . [/interface get $i name] . "|" . '
-        '[/interface get $i type] . "|" . [/interface get $i mac-address])} on-error={}}',
         ':foreach i in=[/interface wireless find] do={:put ("__MTSCAN__wlan=" . [/interface wireless get $i name] . "|" . '
         '[/interface wireless get $i disabled] . "|" . [/interface wireless get $i running] . "|" . '
         '[/interface wireless get $i radio-name] . "|" . [/interface wireless get $i ssid])}',
@@ -406,7 +403,6 @@ def parse_health(lines: List[str], dev) -> None:
     addresses: List[Dict] = []
     instances: List[Dict] = []
     ids: List[Dict] = []
-    macs: List[Dict] = []
     done = False
 
     def port(name: str) -> Dict:
@@ -439,9 +435,6 @@ def parse_health(lines: List[str], dev) -> None:
         elif key == "addr2" and len(fields) >= 5:
             addresses.append({"address": fields[0], "interface": fields[1], "network": fields[2],
                               "dynamic": fields[3] == "true", "disabled": fields[4] == "true"})
-        elif key == "if" and len(fields) >= 3:
-            if fields[2]:
-                macs.append({"name": fields[0], "type": fields[1], "mac": fields[2].upper()})
         elif key == "w60" and len(fields) >= 5:
             entry = health.w60g_entry(fields[0], {"remote-address": fields[1], "rssi": fields[2],
                                                   "signal": fields[3], "connected": fields[4]})
@@ -460,8 +453,6 @@ def parse_health(lines: List[str], dev) -> None:
         wlan["link_downs"] = link_downs.get(wlan["name"])
     from core import pick_router_id
     dev.router_id = pick_router_id(instances, ids)
-    if macs:
-        dev.macs = macs
     if addresses:   # with network / dynamic, which the plain inventory line lacks
         dev.addresses = addresses
     dev.ports = list(ports.values())
@@ -501,7 +492,6 @@ def scan_host_ssh(host: str, username: str, password: str, port: int = 22,
         board_name=fields.get("board_name") or fields.get("model", ""),
         routeros=fields.get("routeros", ""),
         key=fields.get("serial") or fields.get("software_id", ""), serial=fields.get("serial", ""),
-        software_id=fields.get("software_id", ""),
         license=fields.get("license") or fields.get("level", ""),
         addresses=addresses, status=f"OK (SSH:{port})",
     )

@@ -91,74 +91,31 @@ def link_mode_problem(rate: str, full_duplex) -> str:
     return ""
 
 
-def port_findings(ports: List[Dict], old_ports: Optional[List[Dict]] = None) -> List[Dict]:
-    """What is wrong with each ethernet port: a link that is not 100M/1G full duplex,
+def port_issues(ports: List[Dict], old_ports: Optional[List[Dict]] = None) -> List[str]:
+    """Problems of the ethernet ports: a link that is not 100M/1G full duplex,
     error counters at or above PORT_ERRORS on a port with link, and flapping (the link
-    went down FLAP_LINK_DOWNS+ times since the previous update). One dict per bad port:
-    name, mode (text, '' when fine), rate, half (half duplex), errors {counter: n}, flaps."""
+    went down FLAP_LINK_DOWNS+ times since the previous update)."""
     old = {p.get("name"): p for p in old_ports or []}
-    found = []
+    issues = []
     for port in ports:
         name = port.get("name", "?")
-        mode, errors, flaps = "", {}, 0
+        found = []
         if port.get("running"):
             mode = link_mode_problem(port.get("rate", ""), port.get("full_duplex", ""))
+            if mode:
+                found.append(mode)
             errors = {k: v for k, v in (port.get("errors") or {}).items() if v >= PORT_ERRORS}
+            if errors:
+                worst = sorted(errors.items(), key=lambda kv: -kv[1])[:3]
+                found.append("ошибки " + ", ".join(f"{k}={v}" for k, v in worst))
         before = old.get(name)
         now_downs = to_int(port.get("link_downs"))
         then_downs = to_int(before.get("link_downs")) if before else None
         if now_downs is not None and then_downs is not None and now_downs - then_downs >= FLAP_LINK_DOWNS:
-            flaps = now_downs - then_downs
-        if mode or errors or flaps:
-            found.append({"name": name, "mode": mode, "rate": port.get("rate", ""),
-                          "half": _yes(port.get("full_duplex", "")) is False,
-                          "errors": errors, "flaps": flaps})
-    return found
-
-
-def port_issues(ports: List[Dict], old_ports: Optional[List[Dict]] = None) -> List[str]:
-    """port_findings as text for the «Статус» column."""
-    issues = []
-    for f in port_findings(ports, old_ports):
-        parts = []
-        if f["mode"]:
-            parts.append(f["mode"])
-        if f["errors"]:
-            worst = sorted(f["errors"].items(), key=lambda kv: -kv[1])[:3]
-            parts.append("ошибки " + ", ".join(f"{k}={v}" for k, v in worst))
-        if f["flaps"]:
-            parts.append(f"линк пропадал {f['flaps']} раз с прошлого обновления")
-        issues.append(f"{f['name']} " + ", ".join(parts))
+            found.append(f"линк пропадал {now_downs - then_downs} раз с прошлого обновления")
+        if found:
+            issues.append(f"{name} " + ", ".join(found))
     return issues
-
-
-def radio_findings(radio: List[Dict], old_radio: Optional[List[Dict]] = None,
-                   wireless: Optional[List[Dict]] = None, old_wireless: Optional[List[Dict]] = None) -> List[Dict]:
-    """The radio links that are bad, for the task text: one dict per link —
-    interface, peer (the MAC at the other end), rx, tx, kinds (weak / drop) — and one
-    per wlan interface that flapped (kinds ['flap'], no peer)."""
-    old = {(e.get("interface"), e.get("mac")): e for e in old_radio or []}
-    found = []
-    for entry in radio:
-        rx, tx = entry.get("rx"), entry.get("tx")
-        kinds = []
-        if any(v is not None and v < WEAK_SIGNAL for v in (rx, tx)):
-            kinds.append("weak")
-        before = old.get((entry.get("interface"), entry.get("mac")))
-        if before and any(now is not None and then is not None and now <= then - SIGNAL_DROP
-                          for now, then in ((rx, before.get("rx")), (tx, before.get("tx")))):
-            kinds.append("drop")
-        if kinds:
-            found.append({"interface": entry.get("interface", ""), "peer": entry.get("mac", ""),
-                          "rx": rx, "tx": tx, "kinds": kinds})
-    old_w = {w.get("name"): w for w in old_wireless or []}
-    for wlan in wireless or []:
-        now = to_int(wlan.get("link_downs"))
-        then = to_int((old_w.get(wlan.get("name")) or {}).get("link_downs"))
-        if now is not None and then is not None and now - then > WLAN_FLAPS:
-            found.append({"interface": wlan.get("name", ""), "peer": "", "rx": None, "tx": None,
-                          "kinds": ["flap"], "flaps": now - then})
-    return found
 
 
 def _radio_labels(radio: List[Dict]) -> List[str]:
@@ -289,9 +246,6 @@ def analyse(new, base) -> None:
     if not new.extended:
         return
     old_ok = base is not None and base.extended
-    new.port_findings = port_findings(new.ports, base.ports if old_ok else None)
-    new.radio_findings = radio_findings(new.radio, base.radio if old_ok else None, new.wireless,
-                                        base.wireless if old_ok else None)
     new.port_problem = "; ".join(port_issues(new.ports, base.ports if old_ok else None))
     new.radio_problem = "; ".join(radio_issues(new.radio, base.radio if old_ok else None)
                                   + wlan_flap_issues(new.wireless, base.wireless if old_ok else None))
@@ -304,14 +258,13 @@ def analyse(new, base) -> None:
 # Problems the operator has accepted with «Подтвердить» (Device.confirmed) stop
 # colouring the row and matching the problem filters; changes cannot be confirmed
 # (a backup saves them).
-PROBLEM_KINDS = ("error", "port", "radio", "new")
+PROBLEM_KINDS = ("error", "port", "radio")
 
 
 def problem_kinds(dev) -> List[str]:
-    """What the device has now that «Подтвердить» can accept: a failed connection /
-    operation, port and radio problems, and being new in the table."""
+    """Problems the device has now: a failed connection / operation, ports, radio."""
     return [kind for kind, flag in (("error", dev.failed), ("port", dev.port_problem),
-                                    ("radio", dev.radio_problem), ("new", dev.is_new)) if flag]
+                                    ("radio", dev.radio_problem)) if flag]
 
 
 def open_problem(dev, kind: str) -> bool:

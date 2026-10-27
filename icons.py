@@ -174,11 +174,8 @@ def layout(size: int) -> Tuple[int, int, int]:
     return gap, size * 2 + gap, size + gap
 
 
-def row_icon(size: int, checked: bool, refresh: bool = True) -> Tuple[int, int, str]:
-    """Checkbox + update button side by side -> (w, h, base64 PNG); without the update
-    button (the viewer cannot update) just the checkbox."""
-    if not refresh:
-        return header_icon(size, checked)
+def row_icon(size: int, checked: bool) -> Tuple[int, int, str]:
+    """Checkbox + update button side by side -> (w, h, base64 PNG)."""
     _, width, refresh_x = layout(size)
     shapes = checkbox_shapes(0, 0, size, checked) + refresh_shapes(refresh_x, 0, size)
     return width, size, png_base64(width, size, render(width, size, shapes))

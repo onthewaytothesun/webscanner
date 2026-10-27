@@ -110,7 +110,7 @@ def test_api_reads_ports_wireless_and_registration_table():
         "/interface/ethernet/print =stats=": [
             {"name": "ether1", "running": "true", "rx-fcs-error": "9", "rx-broadcast": "50"},
             {"name": "ether2", "running": "false"}],
-        "/interface/print =.proplist=name,type,mac-address,link-downs,rx-error,tx-error": [
+        "/interface/print =.proplist=name,type,link-downs,rx-error,tx-error": [
             {"name": "ether1", "type": "ether", "link-downs": "2", "rx-error": "3"},
             {"name": "wlan1", "type": "wlan", "link-downs": "7"}],
         "/interface/ethernet/monitor =numbers=ether1 =once=": [{"rate": "100Mbps", "full-duplex": "false"}],
@@ -140,7 +140,7 @@ def test_api_without_wireless_package_is_fine():
 
 def test_ssh_health_script_is_isolated_and_its_reply_parsed():
     script = ssh_client._health_script()
-    assert script.count("[[:parse ") == 15 and script.endswith(':put "__MTSCAN__health=1"')
+    assert script.count("[[:parse ") == 14 and script.endswith(':put "__MTSCAN__health=1"')
     assert ssh_client._rsc_string('a "b" $x \\ y') == '"a \\"b\\" \\$x \\\\ y"'
     reply = """__MTSCAN__eth=ether1|true
 __MTSCAN__eth=ether2|false
@@ -300,7 +300,7 @@ def test_router_id_from_ospf_routeros_6_and_7():
 def test_ax_wifi_and_60ghz_signals_come_from_their_own_menus():
     api = _FakeApi({
         "/interface/ethernet/print =stats=": [{"name": "ether1", "running": "false"}],
-        "/interface/print =.proplist=name,type,mac-address,link-downs,rx-error,tx-error": [
+        "/interface/print =.proplist=name,type,link-downs,rx-error,tx-error": [
             {"name": "ether1", "type": "ether"}, {"name": "wifi1", "type": "wifi", "link-downs": "3"},
             {"name": "wlan60-1", "type": "w60g", "link-downs": "1"}],
         "/interface/wifi/print": [{"name": "wifi1", "configuration.ssid": "ax-net", "disabled": "false",
@@ -329,28 +329,3 @@ def test_ax_wifi_and_60ghz_signals_come_from_their_own_menus():
 def test_port_errors_count_from_10():
     assert health.port_issues([_port(errors={"rx-fcs-error": 9})]) == []
     assert health.port_issues([_port(errors={"rx-fcs-error": 10})]) == ["ether1 ошибки rx-fcs-error=10"]
-
-
-def test_macs_of_physical_interfaces_and_the_software_id_are_collected():
-    api = _FakeApi({
-        "/system/identity/print": [{"name": "CP_Natashi_Kovshovoy_29"}],
-        "/system/license/print": [{"nlevel": "4", "software-id": "ABCD-1234"}],
-        "/system/routerboard/print": [{"serial-number": "HFX0TEST123"}],
-        "/interface/ethernet/print =stats=": [{"name": "ether1", "running": "true"}],
-        "/interface/print =.proplist=name,type,mac-address,link-downs,rx-error,tx-error": [
-            {"name": "ether1", "type": "ether", "mac-address": "aa:00:00:00:00:01"},
-            {"name": "wlan1", "type": "wlan", "mac-address": "AA:00:00:00:00:02"},
-            {"name": "bridge1", "type": "bridge", "mac-address": "AA:00:00:00:00:01"},
-            {"name": "vlan_2", "type": "vlan", "mac-address": "AA:00:00:00:00:01"},
-            {"name": "l2tp-out1", "type": "l2tp-out"}],
-    })
-    dev = Device(ip="10.0.0.1")
-    core._collect_fields(api, dev)
-    assert dev.software_id == "ABCD-1234" and dev.serial == "HFX0TEST123"
-    assert dev.macs == [{"name": "ether1", "type": "ether", "mac": "AA:00:00:00:00:01"},
-                        {"name": "wlan1", "type": "wlan", "mac": "AA:00:00:00:00:02"}]
-    reply = ["__MTSCAN__if=ether1|ether|aa:00:00:00:00:01", "__MTSCAN__if=wlan1|wlan|AA:00:00:00:00:02",
-             "__MTSCAN__health=1"]
-    parsed = Device()
-    ssh_client.parse_health(reply, parsed)
-    assert parsed.macs == dev.macs

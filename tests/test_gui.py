@@ -64,7 +64,7 @@ def test_gui_builds_with_all_row_actions():
         assert list(M.DATA_COLUMNS).index("Last Backup") == list(M.DATA_COLUMNS).index("Last seen") + 1
         shown = [app.tree.heading(c, "text") for c in columns]
         assert shown == ["IP", "Identity", "Модель", "RouterOS", "License", "Был в сети",
-                         "Последний бэкап", "Статус", "Сигнал", "Radio-name", "Ping", "Router-ID", "Winbox", "Заметка"], shown
+                         "Последний бэкап", "Статус", "Сигнал", "Ping", "Router-ID", "Winbox", "Заметка"], shown
         assert "signal" not in app.tree.cget("displaycolumns")   # only with «Слабое радио»
         assert "ping" not in app.tree.cget("displaycolumns")     # only with «Ping»
     finally:
@@ -170,8 +170,8 @@ def test_gui_right_click_copies_cell_or_row():
         assert labels[-3:] == ["Изменить заметку…", "Подтвердить", "Добавить в избранное"], labels
         icons_menu = right_click("SN1", "#0")              # icons column: no cell to copy, but the row and the note
         assert [icons_menu.entrycget(i, "label") for i in range(icons_menu.index("end") + 1)
-                if icons_menu.type(i) == "command"] == ["Копировать строку", "Подробная информация…",
-                                                        "Изменить заметку…", "Подтвердить", "Добавить в избранное"]
+                if icons_menu.type(i) == "command"] == ["Копировать строку", "Изменить заметку…",
+                                                        "Подтвердить", "Добавить в избранное"]
     finally:
         tk.Menu.tk_popup = original
         app._on_close()
@@ -999,7 +999,7 @@ def test_gui_everything_the_user_sees_is_in_russian():
         texts += [app.tree.heading(c, "text") for c in app.tree.cget("columns")]
         texts += [app.notebook.tab(i, "text") for i in range(app.notebook.index("end"))]
         kept = {"IP", "Identity", "RouterOS", "License", "Winbox", "SSH:", "API-SSL:", "Winbox:", "SSH", "API/SSL",
-                "CSV", "▶ Winbox", "Ping", "Router-ID", "Radio-name", "дубль Router-ID"}
+                "CSV", "▶ Winbox", "Ping", "Router-ID", "дубль Router-ID"}
         english = [t for t in texts if re.search(r"[A-Za-z]{3,}", t) and t not in kept
                    and not t.startswith(("SSH:", "API/SSL:", "Порт API-SSL:", "Лог: logs/"))]
         assert english == [], english
@@ -1336,11 +1336,10 @@ def test_gui_all_ips_main_ip_subnet_search_and_ping():
         assert app._visible_iids() == ["S2"]
         app.var_find.set(""); app._apply_search()
 
-        app._show_details("S1")
-        rows = app._detail_rows(app.devices["S1"])
-        assert [r["value"] for r in rows] == ["10.20.58.33", "10.20.24.132", "45.87.140.114"]
-        assert rows[2]["main"] is False
-        app._details_dialog.destroy()
+        app._show_all_ips("S1")
+        rows = app._ip_rows(app.devices["S1"])
+        assert [r[0] for r in rows] == ["10.20.58.33", "10.20.24.132", "45.87.140.114"] and rows[2][3] is False
+        app._ips_dialog.destroy()
 
         app._set_main_ip("S1", "10.20.24.132")
         assert app.tree.set("S1", "IP") == "10.20.24.132"
@@ -1485,225 +1484,3 @@ def test_gui_update_also_looks_for_new_devices_in_scanned_subnets():
         assert app._networks() == ["10.30.0.0/30"]
     finally:
         app._on_close()
-
-
-def test_gui_new_devices_are_green_have_a_filter_and_are_accepted_by_confirm_or_backup():
-    M, tk, root, app = _open()
-    from core import Device
-    from unittest.mock import patch
-    try:
-        def polled(ip, key):
-            return Device(ip=ip, key=key, serial=key, extended=True, identity="R" + key,
-                          addresses=[{"address": ip + "/24", "interface": "bridge1", "network": "x"}])
-        # the first scan of an empty table marks nothing
-        app._start_scan = M.ScannerApp._start_scan.__get__(app)
-        app._scan_marks_new = bool(app.devices)
-        app._baselines = {}
-        app._accept_polled(polled("10.0.0.1", "A"))
-        assert app.devices["A"].is_new is False and not app.tree.item("A", "tags")
-        # a scan that adds devices to a table that has some: the new ones are green
-        app._scan_marks_new = bool(app.devices)
-        app._baselines = {}
-        app._accept_polled(polled("10.0.0.2", "B"))
-        app._accept_polled(polled("10.0.0.1", "A"))                       # a known device stays as it was
-        assert app.devices["B"].is_new and app.tree.item("B", "tags") == ("new",)
-        assert not app.devices["A"].is_new
-        app._tick()
-        assert "новых: 1" in app.lbl_counts.cget("text")
-        app.var_new_only.set(True); app._on_filter_change()
-        assert app._visible_iids() == ["B"]
-        # a rescan keeps it new; «Подтвердить» accepts it and keeps the status text
-        app.var_new_only.set(False); app._on_filter_change()
-        app._baselines = {}
-        app._accept_polled(polled("10.0.0.2", "B"))
-        assert app.devices["B"].is_new
-        status = app.devices["B"].status = "OK (API-SSL:8729)"
-        app.checked = {"B"}
-        app.on_confirm()
-        assert app.devices["B"].confirmed == ["new"] and app.devices["B"].status == status
-        assert not app.tree.item("B", "tags")
-        app.on_confirm()                                                   # again: takes it back
-        assert app.devices["B"].confirmed == [] and app.tree.item("B", "tags") == ("new",)
-        # the first backup also makes it an ordinary device
-        with patch.object(M.core, "open_device_api") as opened, patch.object(M.core, "fetch_export",
-                                                                              return_value="# cfg"):
-            app._backup_one(app.devices["B"], {"cmdtype": "API/SSL", "api_ssl_port": 8729, "timeout": 5,
-                                               "retries": 0, "user": "u", "password": "p", "ssh_port": 22})
-        assert app.devices["B"].is_new is False
-    finally:
-        app._on_close()
-
-
-def test_gui_radio_name_column_search_by_mac_serial_and_russian_address():
-    M, tk, root, app = _open()
-    from core import Device
-    try:
-        app._upsert_device(Device(
-            ip="10.0.0.1", key="S1", serial="HFX0TEST123", software_id="ABCD-1234", extended=True,
-            identity="CP_Natashi_Kovshovoy_29",
-            macs=[{"name": "ether1", "type": "ether", "mac": "AA:BB:CC:00:00:01"}],
-            wireless=[{"name": "wlan1", "radio_name": "tower-7", "ssid": "net"},
-                      {"name": "wlan2", "radio_name": "tower-7", "ssid": "net5"}]))
-        app._upsert_device(Device(ip="10.0.0.2", key="S2", identity="CP_Other_1"))
-
-        def search(text):
-            app.var_find.set(text)
-            app._apply_search()
-            return app._visible_iids()
-        assert search("AA:BB:CC:00:00:01") == ["S1"] and search("aabbcc000001") == ["S1"]
-        assert search("aa-bb-cc-00-00-01") == ["S1"]
-        assert search("hfx0test123") == ["S1"] and search("ABCD-1234") == ["S1"]
-        assert search("Ковшовой") == ["S1"] and search("tower-7") == ["S1"]
-        search("")
-        assert "radio_name" not in app.tree.cget("displaycolumns")
-        app.var_radio_name_show.set(True); app._on_filter_change()
-        assert "radio_name" in app.tree.cget("displaycolumns") and app._visible_iids() == ["S1"]
-        assert app.tree.set("S1", "radio_name") == "tower-7"                # each name once
-        app.sort_by("radio_name")
-    finally:
-        app._on_close()
-
-
-def test_gui_details_window_lists_ips_macs_serial_and_software_id():
-    M, tk, root, app = _open()
-    from core import Device
-    try:
-        app._upsert_device(Device(
-            ip="10.0.0.1", key="S1", serial="HFX0TEST123", software_id="ABCD-1234",
-            addresses=[{"address": "10.0.0.1/24", "interface": "bridge1", "network": "10.0.0.0"}],
-            macs=[{"name": "ether1", "type": "ether", "mac": "AA:BB:CC:00:00:01"},
-                  {"name": "wlan1", "type": "wlan", "mac": "AA:BB:CC:00:00:02"}]))
-        rows = app._detail_rows(app.devices["S1"])
-        assert [(r["section"], r["value"]) for r in rows] == [
-            ("ip", "10.0.0.1"), ("mac", "AA:BB:CC:00:00:01"), ("mac", "AA:BB:CC:00:00:02"),
-            ("id", "HFX0TEST123"), ("id", "ABCD-1234")]
-        app._show_details("S1")
-        assert app._details_dialog.title().startswith("Подробная информация")
-        app._details_dialog.destroy()
-    finally:
-        app._on_close()
-
-
-def test_gui_any_column_can_be_hidden_and_it_is_remembered():
-    M, tk, root, app = _open()
-    try:
-        app._toggle_column("License")
-        app._toggle_column("Note")
-        shown = list(app.tree.cget("displaycolumns"))
-        assert "License" not in shown and "Note" not in shown and "IP" in shown
-        menu = app._columns_menu()
-        labels = [menu.entrycget(i, "label") for i in range(menu.index("end") + 1) if menu.type(i) != "separator"]
-        assert labels[:3] == ["IP", "Identity", "Модель"] and "Radio-name" in labels
-        assert "Показать все столбцы" in labels
-        app._on_close()
-        app2 = M.ScannerApp(tk.Tk())
-        try:
-            assert "License" not in app2.tree.cget("displaycolumns")
-            app2._show_all_columns()
-            assert "License" in app2.tree.cget("displaycolumns")
-            for column in M.TREE_COLUMNS:                       # the last visible column stays
-                app2._toggle_column(column)
-            assert list(app2.tree.cget("displaycolumns")) != []
-        finally:
-            app2._on_close()
-    except Exception:
-        raise
-
-
-def test_gui_create_task_from_the_problem_cell():
-    M, tk, root, app = _open()
-    from core import Device
-    posted = []
-    original = tk.Menu.tk_popup
-    tk.Menu.tk_popup = lambda self, x, y, entry="": posted.append(self)
-    try:
-        dev = Device(
-            ip="10.0.0.1", key="S1", extended=True, board_name="SXTsq 5", identity="AP_Varshavskoe_sh_128k1->Kavkazskiy_b_r_59s2",
-            macs=[{"name": "ether1", "type": "ether", "mac": "AA:00:00:00:00:01"},
-                  {"name": "wlan1", "type": "wlan", "mac": "AA:00:00:00:00:02"}],
-            radio=[{"interface": "wlan1", "mac": "CC:00:00:00:00:09", "rx": -80, "tx": -70}],
-            radio_problem="wlan1: слабый сигнал rx -80", status="Радио: wlan1: слабый сигнал rx -80",
-            radio_findings=[{"interface": "wlan1", "peer": "CC:00:00:00:00:09", "rx": -80, "tx": -70,
-                             "kinds": ["weak"]}])
-        app._upsert_device(dev)
-        app._upsert_device(Device(ip="10.0.0.9", key="S9", identity="CP_Plain_1"))
-        _pump(root, 3)
-
-        def right_click(iid, column):
-            bx, by, bw, bh = app.tree.bbox(iid, column)
-            event = "<Button-2>" if root.tk.call("tk", "windowingsystem") == "aqua" else "<Button-3>"
-            app.tree.event_generate(event, x=bx + 5, y=by + bh // 2)
-            _pump(root, 2)
-            return posted[-1]
-
-        def commands(menu):
-            return [menu.entrycget(i, "label") for i in range(menu.index("end") + 1) if menu.type(i) == "command"]
-        assert "Создать задачу" not in commands(right_click("S9", "Status"))        # nothing wrong there
-        app.var_signal_show.set(True); app._on_filter_change()                      # (hides S9: no radio)
-        _pump(root, 3)
-        status_menu = right_click("S1", "Status")
-        assert "Создать задачу" in commands(status_menu)
-        status_menu.invoke(commands(status_menu).index("Создать задачу"))
-        assert root.clipboard_get() == (
-            "Варшавское ш 128к1 Юстировать SXTsq 5 AA:00:00:00:00:02 в сторону Кавказский б-р 59с2")
-        assert "Создать задачу" in commands(right_click("S1", "signal"))
-        assert "Создать задачу" not in commands(right_click("S1", "IP"))            # only on the problem cells
-        app.devices["S1"].confirmed = ["radio"]                                      # accepted: no task
-        assert "Создать задачу" not in commands(right_click("S1", "Status"))
-    finally:
-        tk.Menu.tk_popup = original
-        app._on_close()
-
-
-def test_viewer_has_only_the_allowed_controls_and_keeps_its_own_settings():
-    import mikrotik_viewer as V
-    M, tk, root, app = _open()
-    from core import Device
-    app._upsert_device(Device(ip="10.0.0.1", key="S1", identity="CP_Natashi_Kovshovoy_29"))
-    app.var_user.set("admin"); app.var_pass.set("secret"); app.var_save.set(True)
-    app._on_close()                                   # the scanner saved its login and password
-    import shutil
-    shutil.rmtree(os.path.join(M.APP_DIR, "logs"), ignore_errors=True)
-    root2 = tk.Tk()
-    viewer = V.ViewerApp(root2)
-    try:
-        assert root2.title() == "Просмотр MikroTik" and viewer.VIEWER
-        assert viewer.devices["S1"].identity == "CP_Natashi_Kovshovoy_29"       # the same data
-        assert viewer.var_user.get() == "" and viewer.var_pass.get() == ""      # but not the scanner's login
-        assert not viewer.command_editors and viewer.notebook is None
-        buttons = []
-
-        def walk(widget):
-            for child in widget.winfo_children():
-                if child.winfo_class() in ("TButton", "Button"):
-                    buttons.append(str(child.cget("text")))
-                walk(child)
-        walk(root2)
-        assert sorted(b for b in buttons if b) == sorted(
-            ["Подтвердить", "★ Избранное", "Открыть бэкапы", "Удалить", "Очистить", "Модель: все"]), buttons
-        labels = []
-
-        def labels_of(widget):
-            for child in widget.winfo_children():
-                if child.winfo_class() in ("TLabel", "TCheckbutton"):
-                    labels.append(str(child.cget("text")))
-                labels_of(child)
-        labels_of(root2)
-        for forbidden in ("Сеть:", "API-SSL:", "SSH:", "Потоки:", "Таймаут:", "Повторы:", "Тип команд:",
-                          "Команда:", "Сохранить лог"):
-            assert forbidden not in labels and forbidden not in buttons, forbidden
-        assert "Winbox:" in labels and "Запомнить настройки" in labels
-        # the update button is not drawn next to the checkbox and does nothing
-        assert int(viewer.tree.column("#0", "width")) < int(root2.winfo_width()) and viewer._icon_w == viewer._icon_size
-        viewer.on_update_one("S1")
-        assert not viewer._busy()
-        viewer.var_user.set("stp"); viewer.var_pass.set("stp-pass"); viewer.var_save.set(True)
-    finally:
-        viewer._on_close()
-    import json
-    with open(M.CONFIG_FILE, encoding="utf-8") as fh:
-        saved = json.load(fh)
-    assert saved["settings"]["user"] == "admin"                                  # the scanner's section is untouched
-    assert saved["viewer_settings"]["user"] == "stp" and "network" not in saved["viewer_settings"]
-    assert "viewer_ui" in saved and saved["commands"]["commands"]                # the scanner's drafts are kept
-    assert not os.path.exists(os.path.join(M.APP_DIR, "logs"))                   # no log files
